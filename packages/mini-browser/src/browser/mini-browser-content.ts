@@ -32,6 +32,7 @@ import debounce = require('lodash.debounce');
 import { MiniBrowserContentStyle } from './mini-browser-content-style';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { FileChangesEvent, FileChangeType } from '@theia/filesystem/lib/common/files';
+import { MiniBrowserEnvironment } from './mini-browser-environment';
 
 /**
  * Initializer properties for the embedded browser widget.
@@ -179,6 +180,9 @@ export class MiniBrowserContent extends BaseWidget {
 
     @inject(FileService)
     protected readonly fileService: FileService;
+
+    @inject(MiniBrowserEnvironment)
+    protected readonly miniBrowserEnvironment: MiniBrowserEnvironment;
 
     protected readonly submitInputEmitter = new Emitter<string>();
     protected readonly navigateBackEmitter = new Emitter<void>();
@@ -511,8 +515,16 @@ export class MiniBrowserContent extends BaseWidget {
         return element;
     }
 
-    protected mapLocation(location: string): Promise<string> {
-        return this.locationMapper.map(location);
+    protected async mapLocation(location: string): Promise<string> {
+        const [hostPattern, mappedLocation] = await Promise.all([
+            this.miniBrowserEnvironment.hostPattern,
+            this.locationMapper.map(location),
+        ]);
+        // The `LocationMapper` will most likely resolve something on Theia's main host.
+        // But we need to re-route those to the virtual host where the mini-browser accepts requests.
+        const url = new URL(mappedLocation);
+        url.host = hostPattern.replace('{{hostname}}', url.host);
+        return url.toString();
     }
 
     protected setInput(value: string): void {

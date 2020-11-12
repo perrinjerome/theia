@@ -6,6 +6,7 @@
 
 - [file-search] Deprecate dependency on `@theia/process` and replaced its usage by node's `child_process` api.
 - [electron] Removed `attachWillPreventUnload` method from the Electron main application. The `confirmExit` logic is handled on the frontend. [#8732](https://github.com/eclipse-theia/theia/pull/8732)
+- [core] Deprecated `ElectronMessagingContribution`, token validation is now done in `ElectronTokenValidator` as a `WsRequestValidatorContribution`.
 
 ## v1.7.0 - 29/10/2020
 
