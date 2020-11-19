@@ -19,15 +19,16 @@
 import fetch, { Response, RequestInit } from 'node-fetch';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { getProxyForUrl } from 'proxy-from-env';
-import { promises as fs, createWriteStream } from 'fs';
+import { promises as fs, createReadStream } from 'fs';
 import * as mkdirp from 'mkdirp';
 import * as path from 'path';
 import * as process from 'process';
 import * as stream from 'stream';
 import * as decompress from 'decompress';
 import * as temp from 'temp';
-
-import { green, red } from 'colors/safe';
+import { PluginLockFile } from './plugin-lock-file';
+import { checkStream, fromStream } from 'ssri';
+import { green, red, yellow } from 'colors/safe';
 
 import { promisify } from 'util';
 const mkdirpAsPromised = promisify<string, mkdirp.Made>(mkdirp);
@@ -72,13 +73,17 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
 
     await mkdirpAsPromised(pluginsDir);
 
+    const pluginsLockFilePath = path.resolve(process.cwd(), 'theia-plugins.lock');
+    const pluginsLock = new PluginLockFile(pluginsLockFilePath);
+    await pluginsLock.load();
+
     if (!pck.theiaPlugins) {
         console.log(red('error: missing mandatory \'theiaPlugins\' property.'));
         return;
     }
     try {
         await Promise.all(Object.keys(pck.theiaPlugins).map(
-            plugin => downloadPluginAsync(failures, plugin, pck.theiaPlugins[plugin], pluginsDir, packed)
+            plugin => downloadPluginAsync(failures, plugin, pck.theiaPlugins[plugin], pluginsDir, packed, pluginsLock)
         ));
     } finally {
         temp.cleanupSync();
@@ -87,18 +92,29 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
     if (!ignoreErrors && failures.length > 0) {
         throw new Error('Errors downloading some plugins. To make these errors non fatal, re-run with --ignore-errors');
     }
+    if (pluginsLock.dirty) {
+        await pluginsLock.save();
+        console.log(`Saved plugin lockfile ${pluginsLockFilePath}, you should commit this file.`);
+    }
 }
 
 /**
  * Downloads a plugin, will make multiple attempts before actually failing.
+ *
+ * If lockfile contains integrity for this plugin, will verify that the
+ * downloaded plugin data matches expected integrity, otherwise a failure
+ * is raised.
+ * If lockfile does not contain integrity for this plugin, will compute the
+ * integrity and save it in the lock file.
  *
  * @param failures reference to an array storing all failures
  * @param plugin plugin short name
  * @param pluginUrl url to download the plugin at
  * @param pluginsDir where to download the plugin in
  * @param packed whether to decompress or not
+ * @param pluginLock the lock file with plugin data
  */
-async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl: string, pluginsDir: string, packed: boolean): Promise<void> {
+async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl: string, pluginsDir: string, packed: boolean, pluginLock: PluginLockFile): Promise<void> {
     if (!plugin) {
         return;
     }
@@ -154,18 +170,31 @@ async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl
         return;
     }
 
+    const tempFile = temp.createWriteStream('theia-plugin-download');
+    await pipelineAsPromised(response.body, tempFile);
+
+    const pluginSpec = `${plugin}@${pluginUrl}`;
+    const pluginReadStream = createReadStream(tempFile.path);
+
+    if (!pluginLock.hasLock(pluginSpec)) {
+        console.warn(yellow(`No signature for ${pluginSpec} found in lockfile`));
+        const sri = await fromStream(pluginReadStream);
+        pluginLock.addLock(pluginSpec, { resolved: pluginUrl, integrity: sri.toString() });
+    } else {
+        if (! await checkStream(pluginReadStream, pluginLock.getLock(pluginSpec).integrity).then(() => true, () => false)) {
+            failures.push(red(`x ${plugin}: failed to verify checksum`));
+            return;
+        }
+    }
     if (fileExt === '.vsix' && packed === true) {
         // Download .vsix without decompressing.
-        const file = createWriteStream(targetPath);
-        await pipelineAsPromised(response.body, file);
+        await fs.copyFile(tempFile.path, targetPath);
     } else {
         await mkdirpAsPromised(targetPath);
-        const tempFile = temp.createWriteStream('theia-plugin-download');
-        await pipelineAsPromised(response.body, tempFile);
         await decompress(tempFile.path, targetPath);
     }
 
-    console.warn(green(`+ ${plugin}: downloaded successfully ${attempts > 1 ? `(after ${attempts} attempts)` : ''}`));
+    console.warn(green(`+ ${plugin}: downloaded successfully ${attempts > 1 ? `(after ${attempts} attempts)` : ''} `));
 }
 
 /**
