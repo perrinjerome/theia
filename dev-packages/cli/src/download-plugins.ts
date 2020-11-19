@@ -77,6 +77,9 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
         temp.cleanupSync();
     }
     failures.forEach(console.error);
+    if (failures.length > 0) {
+        throw new Error('Errors downloading plugins');
+    }
 }
 
 /**
