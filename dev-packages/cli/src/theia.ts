@@ -156,6 +156,12 @@ function rebuildCommand(command: string, target: ApplicationProps.Target): yargs
                     describe: 'Controls whether to pack or unpack plugins',
                     boolean: true,
                     default: false,
+                },
+                'tolerate_download_failures': {
+                    alias: 'tolerate-download-failures',
+                    describe: 'Controls whether failures downloading plugins should be tolerated',
+                    boolean: true,
+                    default: false,
                 }
             },
             handler: async args => {

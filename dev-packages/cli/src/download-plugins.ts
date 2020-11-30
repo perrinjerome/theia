@@ -44,6 +44,13 @@ export interface DownloadPluginsOptions {
      * Defaults to `false`.
      */
     packed?: boolean;
+
+    /**
+     * Determines if failures while downloading plugins should be tolerated.
+     * Defaults to `false`.
+     */
+    tolerate_download_failures?: boolean;
+
 }
 
 export default async function downloadPlugins(options: DownloadPluginsOptions = {}): Promise<void> {
@@ -53,6 +60,7 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
 
     const {
         packed = false,
+        tolerate_download_failures = false,
     } = options;
 
     console.warn('--- downloading plugins ---');
@@ -77,8 +85,8 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
         temp.cleanupSync();
     }
     failures.forEach(console.error);
-    if (failures.length > 0) {
-        throw new Error('Errors downloading plugins');
+    if (!tolerate_download_failures && failures.length > 0) {
+        throw new Error('Errors downloading some plugins. To ignore download error, re-run with --tolerate-download-failures');
     }
 }
 
