@@ -1,5 +1,9 @@
 # Change Log
 
+<a name="breaking_changes_1.9.0">[Breaking Changes:](#breaking_changes_1.9.0)</a>
+
+- [`download:plugins`] errors when downloading plugins now result in build failures [#8788](https://github.com/eclipse-theia/theia/pull/8788)
+
 ## v1.8.0 - 26/11/2020
 
 - [api-tests] fixed issue with `saveable` test suite [#8736](https://github.com/eclipse-theia/theia/pull/8736)
