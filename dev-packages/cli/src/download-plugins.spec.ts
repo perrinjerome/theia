@@ -104,7 +104,7 @@ describe('download plugins', () => {
     it('writes signatures in lockfile', async function (): Promise<void> {
         await downloadPlugins();
         const lock = JSON.parse(await fs.readFile(pluginsLockPath, 'utf-8'));
-        expect(lock[`dummy-plugin@${dummyPluginUrl}`]).to.include({
+        expect(lock[dummyPluginUrl]).to.include({
             'integrity': dummyPluginIntegrity
         });
     });
@@ -112,7 +112,7 @@ describe('download plugins', () => {
     it('verifies signatures from lockfile on download', async function (): Promise<void> {
         await fs.writeFile(pluginsLockPath,
             JSON.stringify({
-                [`dummy-plugin@${dummyPluginUrl}`]: {
+                [dummyPluginUrl]: {
                     'resolved': dummyPluginUrl,
                     'integrity': 'sha512-wrongsignature'
                 }
