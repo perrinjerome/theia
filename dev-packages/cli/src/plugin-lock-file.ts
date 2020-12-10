@@ -80,9 +80,7 @@ export class PluginLockFile {
     getLock(pluginSpec: string): PluginLock {
         return this.lockMapping[pluginSpec];
     }
-    hasLock(pluginSpec: string): boolean {
-        return this.lockMapping[pluginSpec] !== undefined;
-    }
+
     addLock(pluginSpec: string, pluginLock: PluginLock): void {
         if (this.lockMapping[pluginSpec] !== undefined) {
             throw new Error(`lock for ${pluginSpec} already exist`);

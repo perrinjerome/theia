@@ -51,6 +51,12 @@ export interface DownloadPluginsOptions {
      * Defaults to `false`.
      */
     ignoreErrors?: boolean;
+
+    /**
+     * Determine the base URL of the open-vsx installation used to resolve plugins.
+     * Defaults to `https://open-vsx.org`.
+     */
+    openVsxUrl?: string;
 }
 
 export default async function downloadPlugins(options: DownloadPluginsOptions = {}): Promise<void> {
@@ -61,6 +67,7 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
     const {
         packed = false,
         ignoreErrors = false,
+        openVsxUrl = 'https://open-vsx.org'
     } = options;
 
     console.warn('--- downloading plugins ---');
@@ -83,7 +90,7 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
     }
     try {
         await Promise.all(Object.keys(pck.theiaPlugins).map(
-            plugin => downloadPluginAsync(failures, plugin, pck.theiaPlugins[plugin], pluginsDir, packed, pluginsLock)
+            plugin => downloadPluginAsync(failures, plugin, pck.theiaPlugins[plugin], pluginsDir, packed, pluginsLock, openVsxUrl)
         ));
     } finally {
         temp.cleanupSync();
@@ -94,7 +101,7 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
     }
     if (pluginsLock.dirty) {
         await pluginsLock.save();
-        console.log(`Saved plugin lockfile ${pluginsLockFilePath}, you should commit this file.`);
+        console.log(`Saved plugin lockfile "${pluginsLockFilePath}". You should commit this file.`);
     }
 }
 
@@ -109,22 +116,52 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
  *
  * @param failures reference to an array storing all failures
  * @param plugin plugin short name
- * @param pluginUrl url to download the plugin at
+ * @param pluginUrl url to download the plugin at TODO
  * @param pluginsDir where to download the plugin in
  * @param packed whether to decompress or not
- * @param pluginLock the lock file with plugin data
+ * @param pluginLockFile the lock file with plugin data
+ * @param openVsxUrl URL of open-vsx instance
  */
-async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl: string, pluginsDir: string, packed: boolean, pluginLock: PluginLockFile): Promise<void> {
+async function downloadPluginAsync(
+    failures: string[],
+    plugin: string,
+    pluginUrl: string,
+    pluginsDir: string,
+    packed: boolean,
+    pluginLockFile: PluginLockFile,
+    openVsxUrl: string): Promise<void> {
     if (!plugin) {
         return;
     }
+
+    const pluginLockDetails = pluginLockFile.getLock(pluginUrl);
+    let resolvedPluginUrl = pluginLockDetails?.resolved;
+
+    if (resolvedPluginUrl === undefined) {
+        const nameSpaceExtensionVersion = /(?<namespace>[^/]+)\/(?<extension>[^/@]+)@(?<version>[^/@]+)/m.exec(pluginUrl)?.groups;
+        if (nameSpaceExtensionVersion !== undefined) {
+            // pluginUrl is an openvsx definition namespace/extension@version
+            const openVsxResponse = await xfetch(
+                `${openVsxUrl}/api/${nameSpaceExtensionVersion.namespace}/${nameSpaceExtensionVersion.extension}/${nameSpaceExtensionVersion.version}`);
+            resolvedPluginUrl = (await openVsxResponse.json())?.files?.download;
+            if (resolvedPluginUrl === undefined) {
+                failures.push(red(`Could not resolve ${pluginUrl} on ${openVsxUrl}`));
+                return;
+            }
+            console.log(`Resolved ${pluginUrl} to ${resolvedPluginUrl}`);
+        } else {
+            // pluginUrl is an URL
+            resolvedPluginUrl = pluginUrl;
+        }
+    }
+
     let fileExt: string;
-    if (pluginUrl.endsWith('tar.gz')) {
+    if (resolvedPluginUrl.endsWith('tar.gz')) {
         fileExt = '.tar.gz';
-    } else if (pluginUrl.endsWith('vsix')) {
+    } else if (resolvedPluginUrl.endsWith('vsix')) {
         fileExt = '.vsix';
     } else {
-        failures.push(red(`error: '${plugin}' has an unsupported file type: '${pluginUrl}'`));
+        failures.push(red(`error: '${plugin}' has an unsupported file type: '${resolvedPluginUrl}'`));
         return;
     }
     const targetPath = path.join(process.cwd(), pluginsDir, `${plugin}${packed === true ? fileExt : ''}`);
@@ -147,7 +184,7 @@ async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl
         }
         lastError = undefined;
         try {
-            response = await xfetch(pluginUrl);
+            response = await xfetch(resolvedPluginUrl);
         } catch (error) {
             lastError = error;
             continue;
@@ -173,15 +210,14 @@ async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl
     const tempFile = temp.createWriteStream('theia-plugin-download');
     await pipelineAsPromised(response.body, tempFile);
 
-    const pluginSpec = `${plugin}@${pluginUrl}`;
     const pluginReadStream = createReadStream(tempFile.path);
 
-    if (!pluginLock.hasLock(pluginSpec)) {
-        console.warn(yellow(`No signature for ${pluginSpec} found in lockfile`));
+    if (pluginLockDetails === undefined) {
+        console.warn(yellow(`No signature for ${pluginUrl} found in lockfile`));
         const sri = await fromStream(pluginReadStream);
-        pluginLock.addLock(pluginSpec, { resolved: pluginUrl, integrity: sri.toString() });
+        pluginLockFile.addLock(pluginUrl, { resolved: resolvedPluginUrl, integrity: sri.toString() });
     } else {
-        if (! await checkStream(pluginReadStream, pluginLock.getLock(pluginSpec).integrity).then(() => true, () => false)) {
+        if (! await checkStream(pluginReadStream, pluginLockDetails.integrity).then(() => true, () => false)) {
             failures.push(red(`x ${plugin}: failed to verify checksum`));
             return;
         }
